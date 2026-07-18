@@ -44,6 +44,9 @@ TableIndex GetGroupIdx(const unique_ptr<LogicalOperator> &op) {
 }
 
 TableIndex GetAggregateIdx(const unique_ptr<LogicalOperator> &op) {
+	if (op->type == LogicalOperatorType::LOGICAL_FILTER) {
+		return GetAggregateIdx(op->children[0]);
+	}
 	if (op->type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
 		return op->Cast<LogicalAggregate>().aggregate_index;
 	}
@@ -55,6 +58,8 @@ TableIndex GetAggregateIdx(const unique_ptr<LogicalOperator> &op) {
 
 LogicalType GetAggregateType(const unique_ptr<LogicalOperator> &op) {
 	switch (op->type) {
+	case LogicalOperatorType::LOGICAL_FILTER:
+		return GetAggregateType(op->children[0]);
 	case LogicalOperatorType::LOGICAL_UNNEST: {
 		const auto &logical_unnest = op->Cast<LogicalUnnest>();
 		const idx_t unnest_offset = logical_unnest.children[0]->types.size();
@@ -316,6 +321,10 @@ TopNWindowElimination::CreateAggregateOperator(LogicalWindow &window, vector<uni
 	auto &window_expr = window.expressions[0]->Cast<BoundWindowExpression>();
 	D_ASSERT(window_expr.OrderBy().size() == 1);
 
+	// Without a PARTITION BY, a LIMIT-1 rewrite becomes a groupless aggregate, which emits one (NULL) row on empty
+	// input whereas the ROW_NUMBER window emits none. Guard it below with count(*) > 0.
+	const bool add_empty_input_guard = window_expr.Partitions().empty() && params.limit == 1;
+
 	vector<unique_ptr<Expression>> aggregate_params;
 	aggregate_params.reserve(3);
 
@@ -344,6 +353,16 @@ TopNWindowElimination::CreateAggregateOperator(LogicalWindow &window, vector<uni
 	vector<unique_ptr<Expression>> select_list;
 	select_list.push_back(std::move(aggregate_expr));
 
+	if (add_empty_input_guard) {
+		// count(*) as the last aggregate; consumed by the guard filter below and projected out afterwards.
+		auto &count_catalog = Catalog::GetSystemCatalog(context);
+		FunctionBinder count_binder(context);
+		auto &count_entry = count_catalog.GetEntry<AggregateFunctionCatalogEntry>(
+		    context, QualifiedName(count_catalog.GetName(), Identifier::DefaultSchema(), Identifier("count_star")));
+		const auto &count_fun = count_entry.functions.GetFunctionByArguments(context, {});
+		select_list.push_back(count_binder.BindAggregateFunction(count_fun, {}));
+	}
+
 	auto aggregate = make_uniq<LogicalAggregate>(optimizer.binder.GenerateTableIndex(),
 	                                             optimizer.binder.GenerateTableIndex(), std::move(select_list));
 	aggregate->groupings_index = optimizer.binder.GenerateTableIndex();
@@ -363,6 +382,22 @@ TopNWindowElimination::CreateAggregateOperator(LogicalWindow &window, vector<uni
 			}
 			aggregate->group_stats[i] = group_stats->second->ToUnique();
 		}
+	}
+
+	if (add_empty_input_guard) {
+		// The groupless aggregate emits one (NULL) row on empty input; keep only rows where count(*) > 0 so the
+		// rewrite produces no rows for empty input, matching the ROW_NUMBER window it replaces.
+		const idx_t count_idx = aggregate->expressions.size() - 1;
+		auto count_ref = make_uniq<BoundColumnRefExpression>(
+		    LogicalType::BIGINT, ColumnBinding(aggregate->aggregate_index, ProjectionIndex(count_idx)));
+		auto zero = make_uniq<BoundConstantExpression>(Value::BIGINT(0));
+		auto condition = BoundComparisonExpression::Create(ExpressionType::COMPARE_GREATERTHAN, std::move(count_ref),
+		                                                   std::move(zero));
+		auto guard = make_uniq<LogicalFilter>();
+		guard->expressions.push_back(std::move(condition));
+		guard->children.push_back(std::move(aggregate));
+		guard->ResolveOperatorTypes();
+		return unique_ptr<LogicalOperator>(std::move(guard));
 	}
 
 	return unique_ptr<LogicalOperator>(std::move(aggregate));
@@ -409,16 +444,16 @@ TopNWindowElimination::CreateRowNumberGenerator(unique_ptr<Expression> aggregate
 unique_ptr<LogicalOperator>
 TopNWindowElimination::TryCreateUnnestOperator(unique_ptr<LogicalOperator> op,
                                                const TopNWindowEliminationParameters &params) const {
+	if (params.limit <= 1) {
+		// LIMIT 1 -> we do not need to unnest
+		return op;
+	}
+
 	D_ASSERT(op->type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY);
 
 	auto &logical_aggregate = op->Cast<LogicalAggregate>();
 	const idx_t aggregate_column_idx = logical_aggregate.groups.size();
 	LogicalType aggregate_type = logical_aggregate.types[aggregate_column_idx];
-
-	if (params.limit <= 1) {
-		// LIMIT 1 -> we do not need to unnest
-		return op;
-	}
 
 	// Create unnest expression for aggregate args
 	const auto aggregate_bindings = logical_aggregate.GetColumnBindings();
