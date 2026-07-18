@@ -1,0 +1,55 @@
+# name: test/sql/function/string/regex_multiline_option.test
+# description: the 'm'/'n'/'p' regex option enables newline-sensitive (multiline) matching (issue #17056)
+# group: [string]
+
+# With the 'm' option, ^ and $ match at line boundaries.
+query I
+SELECT regexp_extract('Line 1' || chr(10) || 'text' || chr(10) || 'Line 2', '^Line.*$', 0, 'm');
+----
+Line 1
+
+# Without 'm', ^ matches only the start of the whole text.
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', '^Line.*$', 0, 'm') = 'Line 2';
+----
+true
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', '^Line.*$', 0);
+----
+(empty)
+
+# regexp_matches honors 'm'
+query I
+SELECT regexp_matches('a' || chr(10) || 'Line 2', '^Line', 'm');
+----
+true
+
+query I
+SELECT regexp_matches('a' || chr(10) || 'Line 2', '^Line');
+----
+false
+
+# regexp_replace honors 'm' (compared as a whole to avoid a multi-line result cell)
+query I
+SELECT regexp_replace('x1' || chr(10) || 'x2', '^x', 'Y', 'gm') = ('Y1' || chr(10) || 'Y2');
+----
+true
+
+# regexp_extract_all honors 'm'
+query I
+SELECT regexp_extract_all('Line 1' || chr(10) || 'Line 2', '^Line \d', 0, 'm');
+----
+[Line 1, Line 2]
+
+# non-constant pattern (from a column) honors 'm'
+statement ok
+CREATE TABLE pat(p VARCHAR);
+
+statement ok
+INSERT INTO pat VALUES ('^Line.*$');
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', p, 0, 'm') FROM pat;
+----
+Line 2
