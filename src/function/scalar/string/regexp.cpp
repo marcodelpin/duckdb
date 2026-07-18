@@ -148,14 +148,14 @@ static void RegexpMatchesFunction(DataChunk &args, ExpressionState &state, Vecto
 			return OP::Operation(CreateStringPiece(input), lstate.constant_pattern);
 		});
 	} else {
-		BinaryExecutor::Execute<string_t, string_t, bool>(strings, patterns, result,
-		                                                  [&](string_t input, string_t pattern) {
-			                                                  RE2 re(info.multiline ? "(?m)" + pattern.GetString() : pattern.GetString(), info.options);
-			                                                  if (!re.ok()) {
-				                                                  throw InvalidInputException(re.error());
-			                                                  }
-			                                                  return OP::Operation(CreateStringPiece(input), re);
-		                                                  });
+		BinaryExecutor::Execute<string_t, string_t, bool>(
+		    strings, patterns, result, [&](string_t input, string_t pattern) {
+			    RE2 re(info.multiline ? "(?m)" + pattern.GetString() : pattern.GetString(), info.options);
+			    if (!re.ok()) {
+				    throw InvalidInputException(re.error());
+			    }
+			    return OP::Operation(CreateStringPiece(input), re);
+		    });
 	}
 }
 

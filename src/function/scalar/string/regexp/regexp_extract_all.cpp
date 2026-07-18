@@ -333,8 +333,8 @@ unique_ptr<FunctionData> RegexpExtractAll::Bind(BindScalarFunctionInput &input) 
 	if (multiline && constant_pattern) {
 		constant_string = "(?m)" + constant_string;
 	}
-	auto result = make_uniq<RegexpExtractBindData>(options, std::move(constant_string), constant_pattern,
-	                                               static_cast<int8_t>(0));
+	auto result =
+	    make_uniq<RegexpExtractBindData>(options, std::move(constant_string), constant_pattern, static_cast<int8_t>(0));
 	result->multiline = multiline;
 	return std::move(result);
 }
