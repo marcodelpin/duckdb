@@ -298,10 +298,14 @@ unique_ptr<FunctionData> RegexpExtractAllStruct::Bind(BindScalarFunctionInput &i
 	if (!constant_pattern) {
 		throw BinderException("%s with LIST requires a constant pattern", function.GetName());
 	}
+	bool multiline = false;
 	if (arguments.size() >= 4) {
-		ParseRegexOptions(context, *arguments[3], options);
+		ParseRegexOptions(context, *arguments[3], options, nullptr, nullptr, &multiline);
 	}
 	options.set_log_errors(false);
+	if (multiline) {
+		constant_string = "(?m)" + constant_string;
+	}
 	vector<string> group_names;
 	child_list_t<LogicalType> struct_children;
 	regexp_util::ParseGroupNameList(context, function.GetName().GetIdentifierName(), *arguments[2], constant_string,
@@ -322,11 +326,17 @@ unique_ptr<FunctionData> RegexpExtractAll::Bind(BindScalarFunctionInput &input) 
 	string constant_string;
 	bool constant_pattern = TryParseConstantPattern(context, *arguments[1], constant_string);
 
+	bool multiline = false;
 	if (arguments.size() >= 4) {
-		ParseRegexOptions(context, *arguments[3], options);
+		ParseRegexOptions(context, *arguments[3], options, nullptr, nullptr, &multiline);
 	}
-	return make_uniq<RegexpExtractBindData>(options, std::move(constant_string), constant_pattern,
-	                                        static_cast<int8_t>(0));
+	if (multiline && constant_pattern) {
+		constant_string = "(?m)" + constant_string;
+	}
+	auto result =
+	    make_uniq<RegexpExtractBindData>(options, std::move(constant_string), constant_pattern, static_cast<int8_t>(0));
+	result->multiline = multiline;
+	return std::move(result);
 }
 
 } // namespace duckdb

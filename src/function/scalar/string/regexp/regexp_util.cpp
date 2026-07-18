@@ -20,7 +20,7 @@ bool TryParseConstantPattern(ClientContext &context, Expression &expr, string &c
 }
 
 void ParseRegexOptions(const string &options, duckdb_re2::RE2::Options &result, bool *global_replace,
-                       bool *no_match_returns_input) {
+                       bool *no_match_returns_input, bool *multiline) {
 	for (idx_t i = 0; i < options.size(); i++) {
 		switch (options[i]) {
 		case 'c':
@@ -38,8 +38,11 @@ void ParseRegexOptions(const string &options, duckdb_re2::RE2::Options &result, 
 		case 'm':
 		case 'n':
 		case 'p':
-			// newline-sensitive matching
-			result.set_dot_nl(false);
+			// newline-sensitive matching: ^ and $ match at line boundaries.
+			// RE2 has no such option in non-POSIX mode, so this is applied via a (?m) pattern prefix.
+			if (multiline) {
+				*multiline = true;
+			}
 			break;
 		case 's':
 			// non-newline-sensitive matching
@@ -73,7 +76,7 @@ void ParseRegexOptions(const string &options, duckdb_re2::RE2::Options &result, 
 }
 
 void ParseRegexOptions(ClientContext &context, Expression &expr, RE2::Options &target, bool *global_replace,
-                       bool *no_match_returns_input) {
+                       bool *no_match_returns_input, bool *multiline) {
 	if (expr.HasParameter()) {
 		throw ParameterNotResolvedException();
 	}
@@ -87,7 +90,7 @@ void ParseRegexOptions(ClientContext &context, Expression &expr, RE2::Options &t
 	if (options_str.type().id() != LogicalTypeId::VARCHAR) {
 		throw InvalidInputException("Regex options field must be a string");
 	}
-	ParseRegexOptions(StringValue::Get(options_str), target, global_replace, no_match_returns_input);
+	ParseRegexOptions(StringValue::Get(options_str), target, global_replace, no_match_returns_input, multiline);
 }
 
 void ParseGroupNameList(ClientContext &context, const string &function_name, Expression &group_expr,
