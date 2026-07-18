@@ -1,0 +1,54 @@
+# name: test/sql/optimizer/topn_window_elimination_empty_input.test
+# description: top_n_window_elimination must not emit a row for ROW_NUMBER over empty input (issue #23675)
+# group: [optimizer]
+
+statement ok
+CREATE TABLE e(s INTEGER, p INTEGER);
+
+# Empty input, no PARTITION BY, LIMIT 1: the ROW_NUMBER window emits no rows.
+query I
+SELECT p FROM e QUALIFY row_number() OVER (ORDER BY s) <= 1;
+----
+
+# Non-empty: the whole-table top-1 is still optimized and correct (min s -> its p).
+statement ok
+INSERT INTO e VALUES (5, 50), (3, 30), (8, 80);
+
+query I
+SELECT p FROM e QUALIFY row_number() OVER (ORDER BY s) <= 1;
+----
+30
+
+# A legitimately NULL payload row must still be returned (the count(*) guard must not drop it).
+statement ok
+CREATE TABLE n(s INTEGER, p INTEGER);
+
+statement ok
+INSERT INTO n VALUES (1, NULL);
+
+query I
+SELECT p FROM n QUALIFY row_number() OVER (ORDER BY s) <= 1;
+----
+NULL
+
+# LIMIT > 1 over empty input already returns no rows (unnest of NULL): keep it correct.
+statement ok
+CREATE TABLE e3(s INTEGER, p INTEGER);
+
+query I
+SELECT p FROM e3 QUALIFY row_number() OVER (ORDER BY s) <= 3;
+----
+
+# The optimized results must match the results with the rewrite disabled.
+statement ok
+SET disabled_optimizers = 'top_n_window_elimination'
+
+query I
+SELECT p FROM e QUALIFY row_number() OVER (ORDER BY s) <= 1;
+----
+30
+
+query I
+SELECT p FROM n QUALIFY row_number() OVER (ORDER BY s) <= 1;
+----
+NULL
