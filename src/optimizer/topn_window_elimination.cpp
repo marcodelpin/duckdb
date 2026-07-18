@@ -627,6 +627,13 @@ bool TopNWindowElimination::CanOptimize(LogicalOperator &op) {
 	}
 	auto &window_expr = window.expressions[0]->Cast<BoundWindowExpression>();
 
+	// A ROW_NUMBER with an argument-level ORDER BY (ROW_NUMBER(ORDER BY ...)) computes the row number using that
+	// ordering instead of the window frame ordering. The rewrite below only accounts for the frame ordering, so bail
+	// out when an argument ordering is present.
+	if (!window_expr.ArgOrders().empty()) {
+		return false;
+	}
+
 	if (window_expr.OrderBy().size() != 1) {
 		return false;
 	}
