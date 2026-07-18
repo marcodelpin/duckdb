@@ -1,0 +1,32 @@
+# name: test/sql/optimizer/equal_or_null_projection.test
+# description: equal-or-null OR-rewrite must not fire in projection context (issue #23685)
+# group: [optimizer]
+
+statement ok
+CREATE TABLE t(a INTEGER, b INTEGER);
+
+statement ok
+INSERT INTO t VALUES (1, NULL), (NULL, NULL), (2, 2), (3, 4);
+
+# In a SELECT list (projection) the expression can legitimately evaluate to NULL.
+# The rewrite to `a IS NOT DISTINCT FROM b` (which is never NULL) would wrongly turn
+# the (1, NULL) result from NULL into FALSE. Order by a NULLS LAST:
+#   a=1  -> 1=NULL is NULL, (1 IS NULL AND NULL IS NULL) is FALSE -> NULL OR FALSE = NULL
+#   a=2  -> 2=2 TRUE                                              -> true
+#   a=3  -> 3=4 FALSE, (FALSE AND FALSE) FALSE                    -> false
+#   a=NULL -> NULL=NULL is NULL, (TRUE AND TRUE) TRUE            -> NULL OR TRUE = true
+query I
+SELECT a = b OR (a IS NULL AND b IS NULL) AS r FROM t ORDER BY a NULLS LAST;
+----
+NULL
+true
+false
+true
+
+# In a WHERE clause (LOGICAL_FILTER root) the rewrite is still applied and correct:
+# it keeps rows where a IS NOT DISTINCT FROM b. This guards the intended optimization.
+query II
+SELECT * FROM t WHERE a = b OR (a IS NULL AND b IS NULL) ORDER BY a NULLS LAST;
+----
+2	2
+NULL	NULL

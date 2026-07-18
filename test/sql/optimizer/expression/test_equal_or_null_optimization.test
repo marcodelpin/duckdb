@@ -18,10 +18,13 @@ SELECT i FROM test WHERE (i=j) OR (i IS NULL AND j IS NULL);
 2
 NULL
 
-query II nosort distinctrewrite1
+# issue #23685: in a projection the OR is NOT rewritten to IS NOT DISTINCT FROM
+# (the rewrite is only valid in a predicate/filter context; else it turns NULL into FALSE).
+# No shared result label: the plan no longer matches the rewritten group.
+query II nosort
 EXPLAIN SELECT (i=j) OR (i IS NULL AND j IS NULL) FROM test;
 ----
-physical_plan	<REGEX>:.*DISTINCT.*
+physical_plan	<REGEX>:.*OR.*
 
 query I rowsort
 SELECT i FROM test WHERE i IS NOT DISTINCT FROM j;
@@ -42,10 +45,11 @@ SELECT i FROM test WHERE (i IS NULL AND j IS NULL) OR (i=j);
 2
 NULL
 
-query II nosort distinctrewrite1
+# issue #23685: projection OR is NOT rewritten (see above)
+query II nosort
 EXPLAIN SELECT (i IS NULL AND j IS NULL) OR (i=j) FROM test;
 ----
-physical_plan	<REGEX>:.*DISTINCT.*
+physical_plan	<REGEX>:.*OR.*
 
 # do a hash join
 query I rowsort
