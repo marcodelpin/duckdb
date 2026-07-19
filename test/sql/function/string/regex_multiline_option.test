@@ -53,3 +53,35 @@ query I
 SELECT regexp_extract('a' || chr(10) || 'Line 2', p, 0, 'm') FROM pat;
 ----
 Line 2
+
+# #17056 gate follow-up (duckdb-9am.12): optimizer bail-out + literal guard + non-constant extract_all
+
+statement ok
+CREATE TABLE rc(s VARCHAR);
+
+statement ok
+INSERT INTO rc VALUES ('Line 1'), ('a' || chr(10) || 'Line 2');
+
+# C1: the regex optimizer must not rewrite a multiline '^Line' to a whole-string prefix.
+query I
+SELECT count(*) FROM rc WHERE regexp_matches(s, '^Line', 'm');
+----
+2
+
+# C2: literal ('l') wins over multiline ('m'); the (?m) prefix must not be added.
+query I
+SELECT regexp_matches('^Line', '^Line', 'lm');
+----
+true
+
+# C3: a non-constant pattern in regexp_extract_all honors 'm'.
+statement ok
+CREATE TABLE pat2(p VARCHAR);
+
+statement ok
+INSERT INTO pat2 VALUES ('^Line.*$');
+
+query I
+SELECT regexp_extract_all('a' || chr(10) || 'Line 2', p, 0, 'm') FROM pat2;
+----
+[Line 2]

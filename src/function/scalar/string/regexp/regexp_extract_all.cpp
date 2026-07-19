@@ -141,8 +141,9 @@ void RegexpExtractAll::Execute(DataChunk &args, ExpressionState &state, Vector &
 			if (!pattern_entry.IsValid()) {
 				pattern_valid = false;
 			} else {
-				auto pattern_strpiece = CreateStringPiece(pattern_entry.GetValue());
-				stored_re = make_uniq<duckdb_re2::RE2>(pattern_strpiece, info.options);
+				auto pattern_string = pattern_entry.GetValue().GetString();
+				stored_re =
+				    make_uniq<duckdb_re2::RE2>(info.multiline ? "(?m)" + pattern_string : pattern_string, info.options);
 				auto group_count_p = stored_re->NumberOfCapturingGroups();
 				if (group_count_p == -1) {
 					throw InvalidInputException("Pattern failed to parse, error: '%s'", stored_re->error());

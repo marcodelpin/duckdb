@@ -156,6 +156,12 @@ unique_ptr<Expression> RegexOptimizationRule::Apply(LogicalOperator &op, vector<
 	D_ASSERT(root.GetChildrenMutable().size() == 2 || root.GetChildrenMutable().size() == 3);
 	auto regexp_bind_data = root.BindInfo().get()->Cast<RegexpMatchesBindData>();
 
+	// A multiline pattern matches ^/$ at line boundaries; rewriting it to a whole-string
+	// prefix/contains would change its semantics, so skip the rewrite.
+	if (regexp_bind_data.multiline) {
+		return nullptr;
+	}
+
 	auto constant_value = ExpressionExecutor::EvaluateScalar(GetContext(), constant_expr);
 	D_ASSERT(constant_value.type() == constant_expr.GetReturnType());
 
