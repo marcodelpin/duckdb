@@ -18,10 +18,7 @@ SELECT i FROM test WHERE (i=j) OR (i IS NULL AND j IS NULL);
 2
 NULL
 
-# issue #23685: in a projection the OR is NOT rewritten to IS NOT DISTINCT FROM
-# (the rewrite is only valid in a predicate/filter context; else it turns NULL into FALSE).
-# No shared result label: the plan no longer matches the rewritten group.
-query II nosort
+query II nosort nodistinctprojection1
 EXPLAIN SELECT (i=j) OR (i IS NULL AND j IS NULL) FROM test;
 ----
 physical_plan	<REGEX>:.*OR.*
@@ -45,11 +42,35 @@ SELECT i FROM test WHERE (i IS NULL AND j IS NULL) OR (i=j);
 2
 NULL
 
-# issue #23685: projection OR is NOT rewritten (see above)
-query II nosort
+query II nosort nodistinctprojection2
 EXPLAIN SELECT (i IS NULL AND j IS NULL) OR (i=j) FROM test;
 ----
 physical_plan	<REGEX>:.*OR.*
+
+statement ok
+CREATE TABLE projection_test(a INTEGER, b INTEGER);
+
+statement ok
+INSERT INTO projection_test VALUES (0, NULL);
+
+query I
+SELECT a = b OR (a IS NULL AND b IS NULL) AS v FROM projection_test;
+----
+NULL
+
+query I
+SELECT (a IS NULL AND b IS NULL) OR a = b AS v FROM projection_test;
+----
+NULL
+
+# A root expression of a comparison join operand is not a predicate root
+query I
+SELECT count(*)
+FROM (VALUES (0::INTEGER, NULL::INTEGER)) l(a, b)
+JOIN (VALUES (false)) r(c)
+  ON (l.a = l.b OR (l.a IS NULL AND l.b IS NULL)) = r.c;
+----
+0
 
 # do a hash join
 query I rowsort
