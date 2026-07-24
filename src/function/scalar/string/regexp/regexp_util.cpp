@@ -69,6 +69,10 @@ void ParseRegexOptions(const string &options, duckdb_re2::RE2::Options &result, 
 			throw InvalidInputException("Unrecognized Regex option %c", options[i]);
 		}
 	}
+	// Literal matching has no ^/$ anchors, so a (?m) prefix would be searched as literal text.
+	if (multiline && result.literal()) {
+		*multiline = false;
+	}
 }
 
 void ParseRegexOptions(const Value &options_str, RE2::Options &target, bool *global_replace,
