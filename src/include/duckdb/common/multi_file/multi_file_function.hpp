@@ -101,7 +101,7 @@ public:
 	static unique_ptr<FunctionData> MultiFileBindInternal(ClientContext &context,
 	                                                      unique_ptr<MultiFileReader> multi_file_reader_p,
 	                                                      shared_ptr<MultiFileList> multi_file_list_p,
-	                                                      vector<LogicalType> &return_types, vector<string> &names,
+	                                                      vector<LogicalType> &return_types, vector<Identifier> &names,
 	                                                      MultiFileOptions file_options_p,
 	                                                      unique_ptr<BaseFileReaderOptions> options_p,
 	                                                      unique_ptr<MultiFileReaderInterface> interface_p) {
@@ -120,7 +120,7 @@ public:
 			result->names.emplace_back("empty");
 			result->columns = MultiFileColumnDefinition::ColumnsFromNamesAndTypes(result->names, result->types);
 			return_types = result->types;
-			names = IdentifiersToStrings(result->names);
+			names = result->names;
 			return std::move(result);
 		}
 
@@ -143,7 +143,7 @@ public:
 		if (return_types.empty()) {
 			// no expected types - just copy the types
 			return_types = result->types;
-			names = IdentifiersToStrings(result->names);
+			names = result->names;
 		} else {
 			// We're deserializing from a previously successful bind call
 			// verify that the amount of columns still matches
@@ -183,14 +183,14 @@ public:
 			}
 			// expected types - overwrite the types we want to read instead
 			result->types = return_types;
-			result->table_columns = names;
+			result->table_columns = IdentifiersToStrings(names);
 		}
 		result->columns = MultiFileColumnDefinition::ColumnsFromNamesAndTypes(result->names, result->types);
 		return std::move(result);
 	}
 
 	static unique_ptr<FunctionData> MultiFileBind(ClientContext &context, TableFunctionBindInput &input,
-	                                              vector<LogicalType> &return_types, vector<string> &names) {
+	                                              vector<LogicalType> &return_types, vector<Identifier> &names) {
 		auto interface = OP::CreateInterface(context);
 		auto multi_file_reader = MultiFileReader::Create(input.table_function);
 
@@ -249,8 +249,12 @@ public:
 		}
 		interface->FinalizeCopyBind(context, *options, expected_names, expected_types);
 
-		return MultiFileBindInternal(context, std::move(multi_file_reader), std::move(file_list), expected_types,
-		                             expected_names, std::move(file_options), std::move(options), std::move(interface));
+		// the COPY bind still operates on plain strings - convert around the table function bind
+		auto names = StringsToIdentifiers(expected_names);
+		auto result = MultiFileBindInternal(context, std::move(multi_file_reader), std::move(file_list), expected_types,
+		                                    names, std::move(file_options), std::move(options), std::move(interface));
+		expected_names = IdentifiersToStrings(names);
+		return result;
 	}
 
 	static unique_ptr<MultiFileList> MultiFileFilterPushdown(ClientContext &context, const MultiFileBindData &data,
@@ -730,24 +734,6 @@ public:
 		return partition_data;
 	}
 
-	static bool HandleBlocked(TableFunctionInput &data_p, AsyncResult &res) {
-		D_ASSERT(res.GetResultType() == AsyncResultType::BLOCKED);
-		switch (data_p.results_execution_mode) {
-		case AsyncResultsExecutionMode::TASK_EXECUTOR:
-			data_p.async_result = std::move(res);
-			return true;
-		case AsyncResultsExecutionMode::SYNCHRONOUS:
-			// run the I/O synchronously, then loop again to resume
-			res.ExecuteTasksSynchronously();
-			if (res.GetResultType() != AsyncResultType::HAVE_MORE_OUTPUT) {
-				throw InternalException("Unexpected behaviour from ExecuteTasksSynchronously");
-			}
-			return false;
-		default:
-			throw InternalException("Unexpected AsyncResultsExecutionMode in MultiFileScan");
-		}
-	}
-
 	//! Emit the current output to the caller, or signal the loop to continue when there is nothing to emit yet.
 	static bool EmitOutput(TableFunctionInput &data_p, DataChunk &output) {
 		if (output.size() == 0 && data_p.results_execution_mode == AsyncResultsExecutionMode::SYNCHRONOUS) {
@@ -774,8 +760,8 @@ public:
 
 		data.resuming_blocked_scan = res.GetResultType() == AsyncResultType::BLOCKED;
 		if (res.GetResultType() == AsyncResultType::BLOCKED) {
-			return HandleBlocked(data_p, res) ? MultiFileDecodeResult::RETURN_TO_CALLER
-			                                  : MultiFileDecodeResult::CONTINUE;
+			return data_p.HandleBlocked(res) ? MultiFileDecodeResult::RETURN_TO_CALLER
+			                                 : MultiFileDecodeResult::CONTINUE;
 		}
 
 		output.SetChildCardinality(scan_chunk.size());
@@ -831,7 +817,7 @@ public:
 			auto scheduled =
 			    lstate.job.reader->ScheduleIO(context, *gstate.global_state, *lstate.job.reader_scan_state);
 			lstate.job_state = MultiFileJobState::DECODE;
-			if (scheduled.GetResultType() == AsyncResultType::BLOCKED && HandleBlocked(input, scheduled)) {
+			if (scheduled.GetResultType() == AsyncResultType::BLOCKED && input.HandleBlocked(scheduled)) {
 				return MultiFileAcquireResult::PARKED;
 			}
 		}
