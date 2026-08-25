@@ -395,22 +395,24 @@ static unique_ptr<FunctionData> RegexExtractBind(BindScalarFunctionInput &input)
 
 	int8_t group_index = 0;
 	if (arguments.size() >= 3) {
-		Value group = input.GetConstant(2);
-		if (group.IsNull()) {
-			// NULL group → never returns a capture; runtime treats out-of-range index as no match.
-			group_index = -1;
-		} else if (group.type().id() == LogicalTypeId::LIST) {
+		Value group_or_options = input.GetConstant(2);
+		if (group_or_options.type().id() == LogicalTypeId::LIST) {
 			if (!constant_pattern) {
 				throw BinderException("%s with LIST of group names requires a constant pattern",
 				                      bound_function.GetName());
 			}
 			vector<string> dummy_names; // not reused after bind
 			child_list_t<LogicalType> struct_children;
-			regexp_util::ParseGroupNameList(bound_function.GetName().GetIdentifierName(), group, constant_string,
-			                                options, constant_pattern, dummy_names, struct_children);
+			regexp_util::ParseGroupNameList(bound_function.GetName().GetIdentifierName(), group_or_options,
+			                                constant_string, options, constant_pattern, dummy_names, struct_children);
 			bound_function.SetReturnType(LogicalType::STRUCT(struct_children));
+		} else if (group_or_options.type() == LogicalType::VARCHAR) {
+			ParseRegexOptions(group_or_options, options, nullptr, &no_match_returns_input);
+		} else if (group_or_options.IsNull()) {
+			// NULL group → never returns a capture; runtime treats out-of-range index as no match.
+			group_index = -1;
 		} else {
-			int32_t group_idx = group.GetValue<int32_t>();
+			int32_t group_idx = group_or_options.GetValue<int32_t>();
 			if (group_idx < 0 || group_idx > 9) {
 				throw InvalidInputException("Group index must be between 0 and 9!");
 			}
@@ -434,9 +436,7 @@ ScalarFunctionSet RegexpFun::GetFunctions() {
 	    {{"string", LogicalType::VARCHAR}, {"regex", LogicalType::VARCHAR}, {"options", LogicalType::VARCHAR}},
 	    LogicalType::BOOLEAN, RegexpMatchesFunction<RegexFullMatch>, RegexpMatchesBind, nullptr, RegexInitLocalState,
 	    LogicalType::INVALID, FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING));
-	for (auto &func : regexp_full_match.functions) {
-		func.SetFallible();
-	}
+	regexp_full_match.SetFallible();
 	return (regexp_full_match);
 }
 
@@ -450,9 +450,7 @@ ScalarFunctionSet RegexpMatchesFun::GetFunctions() {
 	    {{"string", LogicalType::VARCHAR}, {"regex", LogicalType::VARCHAR}, {"options", LogicalType::VARCHAR}},
 	    LogicalType::BOOLEAN, RegexpMatchesFunction<RegexPartialMatch>, RegexpMatchesBind, nullptr, RegexInitLocalState,
 	    LogicalType::INVALID, FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING));
-	for (auto &func : regexp_partial_match.functions) {
-		func.SetFallible();
-	}
+	regexp_partial_match.SetFallible();
 	return (regexp_partial_match);
 }
 
@@ -480,6 +478,10 @@ ScalarFunctionSet RegexpExtractFun::GetFunctions() {
 	                                          FunctionNullHandling::SPECIAL_HANDLING));
 	regexp_extract.AddFunction(ScalarFunction(
 	    {{"string", LogicalType::VARCHAR}, {"regex", LogicalType::VARCHAR}, {"group", LogicalType::INTEGER}},
+	    LogicalType::VARCHAR, RegexExtractFunction, RegexExtractBind, nullptr, RegexInitLocalState,
+	    LogicalType::INVALID, FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING));
+	regexp_extract.AddFunction(ScalarFunction(
+	    {{"string", LogicalType::VARCHAR}, {"regex", LogicalType::VARCHAR}, {"options", LogicalType::VARCHAR}},
 	    LogicalType::VARCHAR, RegexExtractFunction, RegexExtractBind, nullptr, RegexInitLocalState,
 	    LogicalType::INVALID, FunctionStability::CONSISTENT, FunctionNullHandling::SPECIAL_HANDLING));
 	regexp_extract.AddFunction(ScalarFunction({{"string", LogicalType::VARCHAR},
