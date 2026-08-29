@@ -910,10 +910,6 @@ TopNWindowElimination::ExtractOptimizerParameters(const LogicalWindow &window, c
 	if (window_expr.OrderBy()[0].expression->GetExpressionType() != ExpressionType::BOUND_COLUMN_REF) {
 		params.can_be_null = true;
 	}
-	if (params.payload_type == TopNPayloadType::SINGLE_COLUMN && !aggregate_payload.empty() &&
-	    aggregate_payload[0]->GetExpressionType() != ExpressionType::BOUND_COLUMN_REF) {
-		params.can_be_null = true;
-	}
 	column_references.clear();
 
 	return params;
