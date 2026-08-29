@@ -85,3 +85,83 @@ query I
 SELECT regexp_extract_all('a' || chr(10) || 'Line 2', p, 0, 'm') FROM pat2;
 ----
 [Line 2]
+
+# The three-argument form regexp_extract(string, pattern, options) also honors 'm'.
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', '^Line.*$', 'm');
+----
+Line 2
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', '^Line.*$', '');
+----
+(empty)
+
+# 'm' combines with 'k' (keep the input on no match) in the same options string.
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', '^Line.*$', 'km');
+----
+Line 2
+
+query I
+SELECT regexp_extract('nomatch', '^Line.*$', 'km');
+----
+nomatch
+
+# ... and with a non-constant pattern.
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', p, 'm') FROM pat;
+----
+Line 2
+
+# The LIST-of-group-names form takes its options from the fourth argument.
+
+query I
+SELECT regexp_extract('a' || chr(10) || 'Line 2', '^(Line) (\d)$', ['w', 'd'], 'm');
+----
+{'w': Line, 'd': 2}
+
+# Semantics lock-down: 's' (dot matches newline) and 'm' (line anchors) are independent
+# and both apply when combined.
+
+query I
+SELECT regexp_matches('x' || chr(10) || 'a' || chr(10) || 'b', '^a.b$', 'sm');
+----
+true
+
+query I
+SELECT regexp_matches('x' || chr(10) || 'a' || chr(10) || 'b', '^a.b$', 'm');
+----
+false
+
+query I
+SELECT regexp_matches('x' || chr(10) || 'a' || chr(10) || 'b', '^a.b$', 's');
+----
+false
+
+query I
+SELECT regexp_matches('x' || chr(10) || 'a' || chr(10) || 'b', '^a.b$');
+----
+false
+
+# Semantics lock-down: 'n' and 'p' are accepted as aliases of 'm'.
+
+query I
+SELECT regexp_matches('a' || chr(10) || 'Line 2', '^Line', 'n');
+----
+true
+
+query I
+SELECT regexp_matches('a' || chr(10) || 'Line 2', '^Line', 'p');
+----
+true
+
+# Semantics lock-down: with 'm', '$' matches before an embedded newline.
+
+query I
+SELECT regexp_extract('Line 1' || chr(10) || 'Line 2', 'Line \d$', 0, 'm');
+----
+Line 1

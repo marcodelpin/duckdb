@@ -389,13 +389,22 @@ static unique_ptr<FunctionData> RegexExtractBind(BindScalarFunctionInput &input)
 	if (arguments.size() >= 4) {
 		ParseRegexOptions(input.GetConstant(3), options, nullptr, &no_match_returns_input, &multiline);
 	}
+	// the three-argument form carries the options string in place of the group index
+	const bool has_group_or_options = arguments.size() >= 3;
+	Value group_or_options;
+	if (has_group_or_options) {
+		group_or_options = input.GetConstant(2);
+		if (group_or_options.type() == LogicalType::VARCHAR) {
+			ParseRegexOptions(group_or_options, options, nullptr, &no_match_returns_input, &multiline);
+		}
+	}
+	// apply the prefix once, after every option source has been parsed
 	if (multiline && constant_pattern) {
 		constant_string = "(?m)" + constant_string;
 	}
 
 	int8_t group_index = 0;
-	if (arguments.size() >= 3) {
-		Value group_or_options = input.GetConstant(2);
+	if (has_group_or_options) {
 		if (group_or_options.type().id() == LogicalTypeId::LIST) {
 			if (!constant_pattern) {
 				throw BinderException("%s with LIST of group names requires a constant pattern",
@@ -407,7 +416,7 @@ static unique_ptr<FunctionData> RegexExtractBind(BindScalarFunctionInput &input)
 			                                constant_string, options, constant_pattern, dummy_names, struct_children);
 			bound_function.SetReturnType(LogicalType::STRUCT(struct_children));
 		} else if (group_or_options.type() == LogicalType::VARCHAR) {
-			ParseRegexOptions(group_or_options, options, nullptr, &no_match_returns_input);
+			// options, already parsed above
 		} else if (group_or_options.IsNull()) {
 			// NULL group → never returns a capture; runtime treats out-of-range index as no match.
 			group_index = -1;
