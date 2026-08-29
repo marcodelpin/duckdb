@@ -165,3 +165,51 @@ query I
 SELECT regexp_extract('Line 1' || chr(10) || 'Line 2', 'Line \d$', 0, 'm');
 ----
 Line 1
+
+# string_split_regex takes its options from the bind data on both the constant-pattern
+# fast path and the per-row recompilation slow path.
+
+statement ok
+CREATE TABLE sep(p VARCHAR);
+
+statement ok
+INSERT INTO sep VALUES (chr(10) || '^-$' || chr(10));
+
+query I
+SELECT string_split_regex('a' || chr(10) || '-' || chr(10) || 'b', chr(10) || '^-$' || chr(10), 'm');
+----
+[a, b]
+
+query I
+SELECT string_split_regex('a' || chr(10) || '-' || chr(10) || 'b', p, 'm') FROM sep;
+----
+[a, b]
+
+# without 'm' the delimiter does not match, so the input is returned unsplit
+query I
+SELECT string_split_regex('a' || chr(10) || '-' || chr(10) || 'b', p) = ['a' || chr(10) || '-' || chr(10) || 'b'] FROM sep;
+----
+true
+
+# the slow path honors the other options too, e.g. case-insensitive matching
+
+statement ok
+CREATE TABLE sep2(p VARCHAR);
+
+statement ok
+INSERT INTO sep2 VALUES ('x');
+
+query I
+SELECT string_split_regex('aXbxc', 'x', 'i');
+----
+[a, b, c]
+
+query I
+SELECT string_split_regex('aXbxc', p, 'i') FROM sep2;
+----
+[a, b, c]
+
+query I
+SELECT string_split_regex('aXbxc', p) FROM sep2;
+----
+[aXb, c]
