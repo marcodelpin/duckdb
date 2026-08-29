@@ -55,7 +55,7 @@ RegexpBaseBindData::~RegexpBaseBindData() {
 bool RegexpBaseBindData::Equals(const FunctionData &other_p) const {
 	auto &other = other_p.Cast<RegexpBaseBindData>();
 	return constant_pattern == other.constant_pattern && constant_string == other.constant_string &&
-	       RegexOptionsEquals(options, other.options);
+	       multiline == other.multiline && RegexOptionsEquals(options, other.options);
 }
 
 unique_ptr<FunctionLocalState> RegexInitLocalState(ExpressionState &state, const BoundFunctionExpression &expr,
