@@ -912,7 +912,16 @@ jobs:
         tar -xzf build/release-artifact.tar.gz -C build
 
     - name: Run all release unit tests
-      run: make allunit T="--test-flags='--thread-stack-size 131072'"
+      # Upstream runs this on namespace-profile runners, where the unittest
+      # thread stack size probe accepts the requested size. On fork runners
+      # (ubuntu-latest) the probe observes the glibc default instead and
+      # unittest exits 1 before listing tests, so forks run without the flag.
+      run: |
+        if [ "${{ github.repository }}" = "duckdb/duckdb" ]; then
+          make allunit T="--test-flags='--thread-stack-size 131072'"
+        else
+          make allunit
+        fi
 
     - name: Tools Tests
       run: python -m pytest tools/shell/tests --shell-binary build/release/duckdb
